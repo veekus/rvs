@@ -1,0 +1,112 @@
+.include "m8def.inc"
+
+; Константы
+.def TIMER1_INTERVAL = 1000 ; Интервал для первого таймера (в миллисекундах)
+.def TIMER2_INTERVAL = 2000 ; Интервал для второго таймера (в миллисекундах)
+
+; Строки для вывода
+.def TIMER1_STR = "ping\r\n"
+.def TIMER2_STR = "pong\r\n"
+
+.cseg
+.org 0x0000 ; Начало программы
+
+    ; Инициализация USART
+    ldi r16, (1 << RXEN) | (1 << TXEN) ; Включение RX и TX USART
+    out UCSRB, r16
+    ldi r16, (1 << UCSZ1) | (1 << UCSZ0) ; 8 бит данных
+    out UCSRC, r16
+    ldi r16, F_CPU / 16 / 9600 - 1 ; Рассчет значения регистра UBRR для скорости 9600 бод
+    out UBRRH, r16
+    ldi r16, r16 >> 8
+    out UBRRL, r16
+
+    ; Инициализация таймеров
+    ldi r16, (1 << CTC1) | (1 << CS12) | (1 << CS10) ; Предделитель 1024 для таймера 1
+    out TCCR1B, r16
+    ldi r16, (F_CPU / 1024 / 1000) - 1 ; Расчет значения регистра OCR для интервала в 1 миллисекунду
+    out OCR1AH, r16 >> 8
+    out OCR1AL, r16
+
+    ldi r16, (1 << CTC0) | (1 << CS02) | (1 << CS00) ; Предделитель 1024 для таймера 0
+    out TCCR0, r16
+    ldi r16, (F_CPU / 1024 / 1000) - 1 ; Расчет значения регистра OCR для интервала в 1 миллисекунду
+    out OCR0, r16
+
+    ; Бесконечный цикл
+    loop:
+        rjmp loop
+
+; Прерывание от таймера 1 (первый таймер)
+.org TIMER1_COMPA_vect
+    push r16
+
+    ldi r16, low(TIMER1_STR) ; Загрузка нижних 8 бит адреса строки TIMER1_STR
+    push r16
+    ldi r16, high(TIMER1_STR) ; Загрузка верхних 8 бит адреса строки TIMER1_STR
+    push r16
+
+    ldi r16, TIMER1_STR
+    rcall print_string ; Вызов функции для вывода строки
+
+    pop r16
+    pop r16
+
+    reti
+
+; Прерывание от таймера 0 (второй таймер)
+.org TIMER0_COMP_vect
+    push r16
+
+    ldi r16, low(TIMER2_STR) ; Загрузка нижних 8 бит адреса строки TIMER2_STR
+    push r16
+    ldi r16, high(TIMER2_STR) ; Загрузка верхних 8 бит адреса строки TIMER2_STR
+    push r16
+
+    ldi r16, TIMER2_STR
+    rcall print_string ; Вызов функции для вывода строки
+
+    pop r16
+    pop r16
+
+    reti
+
+; Функция для вывода строки по USART
+print_string:
+    push r17
+    push r18
+
+    mov r17, r22 ; Сохраняем адрес строки
+    clr r18 ; Счетчик символов
+
+    next_char:
+        ldr r20, Z+ ; Загрузка символа из памяти
+        tst r20 ; Проверка на конец строки (нулевой символ)
+        brne send_char ; Переход на отправку символа, если это не конец строки
+
+        ; Конец строки
+        pop r18 ; Восстановление регистра
+        pop r17 ; Восстановление регистра
+        ret ; Возврат из функции
+
+    send_char:
+        push r17 ; Сохранение рабочих регистров
+        push r18
+
+        ldi r22, LO8(UDR) ; Загрузка адреса регистра UDR
+        st Z, r20 ; Запись символа в регистр UDR
+
+        ldi r16, (1 << UDRE) ; Ожидание пустого регистра UDR
+        sbis UCSRA, UDRE
+        rjmp send_char
+
+        pop r18 ; Восстановление рабочих регистров
+        pop r17
+
+        inc r18 ; Инкремент счетчика символов
+        rjmp next_char ; Переход к следующему символу строки
+
+; Таблица векторов прерываний
+.org 0x0032
+    .dw TIMER1_COMPA_vect ; Прерывание от таймера 1 (первый таймер)
+    .dw TIMER0_COMP_vect ; Прерывание от таймера 0 (второй таймер)
